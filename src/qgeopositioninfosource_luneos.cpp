@@ -127,7 +127,7 @@ void QGeoPositionInfoSourceLuneOS::startUpdates()
     QString payload = QJsonDocument(request).toJson();
 
     try {
-        mTrackingCall = mHandle.callMultiReply("luna://org.webosports.location/startTracking",
+        mTrackingCall = mHandle.callMultiReply("luna://org.webosports.service.location/startTracking",
                                            payload.toUtf8().constData());
         mTrackingCall.continueWith(cbProcessResults, this);
     }
@@ -185,7 +185,7 @@ void QGeoPositionInfoSourceLuneOS::requestUpdate(int timeout)
     m_requestTimer.start(timeout);
 
     try {
-        mRequestCall = mHandle.callOneReply("luna://org.webosports.location/getCurrentPosition", "{}");
+        mRequestCall = mHandle.callOneReply("luna://org.webosports.service.location/getCurrentPosition", "{}");
 
         mRequestCall.continueWith(cbProcessResults, this);
         mRequestCall.setTimeout(timeout);
