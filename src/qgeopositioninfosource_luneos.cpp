@@ -234,7 +234,7 @@ bool QGeoPositionInfoSourceLuneOS::cbProcessResults(LSHandle *handle, LSMessage 
     double altitude = response.value("altitude").toDouble(qQNaN());
     int timestamp = response.value("timestamp").toInt(QDateTime::currentMSecsSinceEpoch());
     QDateTime qtimestamp;
-    qtimestamp.setTime_t(timestamp);
+    qtimestamp.setSecsSinceEpoch(timestamp);
 
     QGeoPositionInfo position = QGeoPositionInfo(QGeoCoordinate(latitude, longitude, altitude), qtimestamp);
 
