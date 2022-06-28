@@ -35,19 +35,19 @@
 #include "qgeopositioninfosourcefactory_luneos.h"
 #include "qgeopositioninfosource_luneos_p.h"
 
-QGeoPositionInfoSource *QGeoPositionInfoSourceFactoryLuneOS::positionInfoSource(QObject *parent)
+QGeoPositionInfoSource *QGeoPositionInfoSourceFactoryLuneOS::positionInfoSource(QObject *parent, const QVariantMap &parameters)
 {
     QGeoPositionInfoSourceLuneOS *src = new QGeoPositionInfoSourceLuneOS(parent);
     return src;
 }
 
-QGeoSatelliteInfoSource *QGeoPositionInfoSourceFactoryLuneOS::satelliteInfoSource(QObject *parent)
+QGeoSatelliteInfoSource *QGeoPositionInfoSourceFactoryLuneOS::satelliteInfoSource(QObject *parent, const QVariantMap &parameters)
 {
     Q_UNUSED(parent);
     return 0;
 }
 
-QGeoAreaMonitorSource *QGeoPositionInfoSourceFactoryLuneOS::areaMonitor(QObject *parent)
+QGeoAreaMonitorSource *QGeoPositionInfoSourceFactoryLuneOS::areaMonitor(QObject *parent, const QVariantMap &parameters)
 {
     Q_UNUSED(parent);
     return 0;
