@@ -61,7 +61,7 @@ QGeoPositionInfoSourceLuneOS::QGeoPositionInfoSourceLuneOS(QObject *parent)
     catch (LS::Error &error) {
         qWarning("Failed to register service handle: %s", error.what());
         m_error = UnknownSourceError;
-        Q_EMIT QGeoPositionInfoSource::error(m_error);
+        Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
     }
 
     m_requestTimer.setSingleShot(true);
@@ -134,7 +134,7 @@ void QGeoPositionInfoSourceLuneOS::startUpdates()
     catch (LS::Error &error) {
         qWarning("Failed to startTracking: %s", error.what());
         m_error = UnknownSourceError;
-        Q_EMIT QGeoPositionInfoSource::error(m_error);
+        Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
     }
 
     // Emit last known position on start
@@ -170,7 +170,7 @@ void QGeoPositionInfoSourceLuneOS::requestUpdate(int timeout)
 #endif
 
     if (timeout < minimumUpdateInterval() && timeout != 0) {
-        Q_EMIT updateTimeout();
+        Q_EMIT QGeoPositionInfoSource::errorOccurred(QGeoPositionInfoSource::UpdateTimeoutError);
         return;
     }
 
@@ -193,7 +193,7 @@ void QGeoPositionInfoSourceLuneOS::requestUpdate(int timeout)
     catch (LS::Error &error) {
         qWarning("Failed to getCurrentPosition: %s", error.what());
         m_error = UnknownSourceError;
-        Q_EMIT QGeoPositionInfoSource::error(m_error);
+        Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
     }
 }
 
@@ -203,7 +203,7 @@ void QGeoPositionInfoSourceLuneOS::requestTimeout()
     qDebug() << "QGeoPositionInfoSourceLuneOS requestUpdate timeout occurred.";
 #endif
 
-    Q_EMIT updateTimeout();
+    Q_EMIT QGeoPositionInfoSource::errorOccurred(QGeoPositionInfoSource::UpdateTimeoutError);
 }
 
 QGeoPositionInfoSource::Error QGeoPositionInfoSourceLuneOS::error() const
@@ -225,7 +225,7 @@ bool QGeoPositionInfoSourceLuneOS::cbProcessResults(LSHandle *handle, LSMessage 
     bool success = response.value("returnValue").toBool();
     if (!success) {
         instance->m_error = UnknownSourceError;
-        Q_EMIT instance->QGeoPositionInfoSource::error(instance->m_error);
+        Q_EMIT instance->QGeoPositionInfoSource::errorOccurred(instance->m_error);
         return true;
     }
 
@@ -234,7 +234,7 @@ bool QGeoPositionInfoSourceLuneOS::cbProcessResults(LSHandle *handle, LSMessage 
     double altitude = response.value("altitude").toDouble(qQNaN());
     int timestamp = response.value("timestamp").toInt(QDateTime::currentMSecsSinceEpoch());
     QDateTime qtimestamp;
-    qtimestamp.setTime_t(timestamp);
+    qtimestamp.setSecsSinceEpoch(timestamp);
 
     QGeoPositionInfo position = QGeoPositionInfo(QGeoCoordinate(latitude, longitude, altitude), qtimestamp);
 

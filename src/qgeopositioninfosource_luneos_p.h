@@ -51,18 +51,18 @@ public:
     ~QGeoPositionInfoSourceLuneOS();
 
     // From QGeoPositionInfoSource
-    void setUpdateInterval(int msec);
-    QGeoPositionInfo lastKnownPosition(bool fromSatellitePositioningMethodsOnly = false) const;
-    PositioningMethods supportedPositioningMethods() const;
-    void setPreferredPositioningMethods(PositioningMethods methods);
-    int minimumUpdateInterval() const;
-    Error error() const;
+    void setUpdateInterval(int msec) override;
+    QGeoPositionInfo lastKnownPosition(bool fromSatellitePositioningMethodsOnly = false) const override;
+    PositioningMethods supportedPositioningMethods() const override;
+    void setPreferredPositioningMethods(PositioningMethods methods) override;
+    int minimumUpdateInterval() const override;
+    Error error() const override;
 
 public Q_SLOTS:
-    virtual void startUpdates();
-    virtual void stopUpdates();
+    virtual void startUpdates() override;
+    virtual void stopUpdates() override;
 
-    virtual void requestUpdate(int timeout = 0);
+    virtual void requestUpdate(int timeout = 0) override;
 
 private Q_SLOTS:
     void requestTimeout();

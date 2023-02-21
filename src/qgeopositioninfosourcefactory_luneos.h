@@ -48,9 +48,9 @@ class QGeoPositionInfoSourceFactoryLuneOS: public QObject, public QGeoPositionIn
     Q_INTERFACES(QGeoPositionInfoSourceFactory)
 
 public:
-    QGeoPositionInfoSource *positionInfoSource(QObject *parent);
-    QGeoSatelliteInfoSource *satelliteInfoSource(QObject *parent);
-    QGeoAreaMonitorSource *areaMonitor(QObject *parent);
+    QGeoPositionInfoSource *positionInfoSource(QObject *parent, const QVariantMap &parameters) override;
+    QGeoSatelliteInfoSource *satelliteInfoSource(QObject *parent, const QVariantMap &parameters) override;
+    QGeoAreaMonitorSource *areaMonitor(QObject *parent, const QVariantMap &parameters) override;
 };
 
 #endif // QGEOPOSITIONINFOSOURCEFACTORY_LUNEOS_H
