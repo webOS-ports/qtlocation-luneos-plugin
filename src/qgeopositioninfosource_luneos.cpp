@@ -31,7 +31,6 @@
 ** $QT_END_LICENSE$
 **
 ****************************************************************************/
-
 #include "qgeopositioninfosource_luneos_p.h"
 
 #include <QtCore/QDateTime>
@@ -46,26 +45,65 @@
 
 #define MINIMUM_UPDATE_INTERVAL 1000
 
+/*
+ * com.webos.service.location/getLocationUpdates schema limits, see
+ * JSCEHMA_GET_LOCATION_UPDATES in the service's LunaLocationServiceUtil.h.
+ * The schema is STRICT_SCHEMA, so sending any key outside it - or a value
+ * outside these bounds - makes the whole call fail validation rather than
+ * being ignored.
+ */
+#define MAXIMUM_MINIMUM_INTERVAL 3600000
+#define MAXIMUM_RESPONSE_TIMEOUT 720
+
 //#define Q_LOCATION_LUNEOS_DEBUG 1
 
 QGeoPositionInfoSourceLuneOS::QGeoPositionInfoSourceLuneOS(QObject *parent)
-:   QGeoPositionInfoSource(parent), m_running(false)
+:   QGeoPositionInfoSource(parent), m_running(false), m_error(NoError)
 {
-
-    try {
-        QString serviceName("qtpositioning_");
-        serviceName += QCoreApplication::applicationName();
-        mHandle = LS::registerService(serviceName.toUtf8().constData());
-        mHandle.attachToLoop(g_main_context_default());
-    }
-    catch (LS::Error &error) {
-        qWarning("Failed to register service handle: %s", error.what());
-        m_error = UnknownSourceError;
-        Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
-    }
-
+    /*
+     * Register anonymously. This plugin is a library loaded into arbitrary
+     * application processes, so it must not claim a bus name of its own: the
+     * name it used to take ("qtpositioning_" + applicationName) appears in no
+     * role file's allowedNames, and com.webos.service.location gates
+     * getLocationUpdates behind the location.query ACG. An anonymous handle
+     * inherits the hosting application's role instead, so the app's own
+     * requiredPermissions decide whether the call is allowed - which is where
+     * that decision belongs.
+     */
     m_requestTimer.setSingleShot(true);
     QObject::connect(&m_requestTimer, SIGNAL(timeout()), this, SLOT(requestTimeout()));
+
+    bool registered = false;
+
+    try {
+        mHandle = LS::registerService(nullptr);
+        registered = true;
+    }
+    catch (LS::Error &error) {
+        qWarning("Failed to register anonymous service handle: %s", error.what());
+    }
+
+    if (!registered) {
+        // Fall back to the historical named registration, for hub
+        // configurations that refuse anonymous clients.
+        try {
+            QString serviceName("qtpositioning_");
+            serviceName += QCoreApplication::applicationName();
+            mHandle = LS::registerService(serviceName.toUtf8().constData());
+            registered = true;
+        }
+        catch (LS::Error &error) {
+            qWarning("Failed to register service handle: %s", error.what());
+        }
+    }
+
+    if (!registered) {
+        m_error = UnknownSourceError;
+        Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
+        return;
+    }
+
+    mHandle.attachToLoop(g_main_context_default());
 
     setPreferredPositioningMethods(AllPositioningMethods);
 }
@@ -86,13 +124,7 @@ void QGeoPositionInfoSourceLuneOS::setUpdateInterval(int msec)
 
 void QGeoPositionInfoSourceLuneOS::setPreferredPositioningMethods(PositioningMethods methods)
 {
-    Q_UNUSED(methods);
-
-    PositioningMethods previousPreferredPositioningMethods = preferredPositioningMethods();
-    if (previousPreferredPositioningMethods == preferredPositioningMethods())
-        return;
-
-    QGeoPositionInfoSource::setPreferredPositioningMethods(supportedPositioningMethods());
+    QGeoPositionInfoSource::setPreferredPositioningMethods(methods & supportedPositioningMethods());
 }
 
 QGeoPositionInfo QGeoPositionInfoSourceLuneOS::lastKnownPosition(bool fromSatellitePositioningMethodsOnly) const
@@ -105,7 +137,37 @@ QGeoPositionInfo QGeoPositionInfoSourceLuneOS::lastKnownPosition(bool fromSatell
 
 QGeoPositionInfoSourceLuneOS::PositioningMethods QGeoPositionInfoSourceLuneOS::supportedPositioningMethods() const
 {
-    return NonSatellitePositioningMethods;
+    /*
+     * com.webos.service.location arbitrates between a GPS handler (the nyx GPS
+     * device) and a network handler, so both families are reachable through it.
+     */
+    return AllPositioningMethods;
+}
+
+/*
+ * Map the requested positioning methods onto the service's "Handler" argument.
+ * Returns an empty string when both families are wanted, in which case the key
+ * is omitted and the service defaults to its HYBRID handler.
+ */
+QString QGeoPositionInfoSourceLuneOS::handlerForPreferredMethods() const
+{
+    const PositioningMethods methods = preferredPositioningMethods();
+
+    /*
+     * These enumerators are masks rather than single bits
+     * (SatellitePositioningMethods is 0x000000ff, NonSatellitePositioningMethods
+     * is 0xffffff00), so they have to be tested with a bitwise AND - testFlag()
+     * would demand every bit of the mask.
+     */
+    const bool satellite = (methods & SatellitePositioningMethods) != 0;
+    const bool nonSatellite = (methods & NonSatellitePositioningMethods) != 0;
+
+    if (satellite && !nonSatellite)
+        return QStringLiteral("gps");
+    if (nonSatellite && !satellite)
+        return QStringLiteral("network");
+
+    return QString();
 }
 
 void QGeoPositionInfoSourceLuneOS::startUpdates()
@@ -124,15 +186,22 @@ void QGeoPositionInfoSourceLuneOS::startUpdates()
 
     QJsonObject request;
     request.insert("subscribe", true);
+    request.insert("minimumInterval",
+                   qBound(0, updateInterval(), MAXIMUM_MINIMUM_INTERVAL));
+
+    const QString handler = handlerForPreferredMethods();
+    if (!handler.isEmpty())
+        request.insert("Handler", handler);
+
     QString payload = QJsonDocument(request).toJson();
 
     try {
-        mTrackingCall = mHandle.callMultiReply("luna://org.webosports.service.location/startTracking",
+        mTrackingCall = mHandle.callMultiReply("luna://com.webos.service.location/getLocationUpdates",
                                            payload.toUtf8().constData());
         mTrackingCall.continueWith(cbProcessResults, this);
     }
     catch (LS::Error &error) {
-        qWarning("Failed to startTracking: %s", error.what());
+        qWarning("Failed to start getLocationUpdates: %s", error.what());
         m_error = UnknownSourceError;
         Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
     }
@@ -184,14 +253,32 @@ void QGeoPositionInfoSourceLuneOS::requestUpdate(int timeout)
     timeout = timeout? : MINIMUM_UPDATE_INTERVAL;
     m_requestTimer.start(timeout);
 
+    /*
+     * responseTimeout is in seconds, while Qt hands us milliseconds. Round up
+     * so a sub-second request still asks the service for at least one second,
+     * and stay inside the schema's 720s ceiling.
+     */
+    const int responseTimeout = qBound(0, (timeout + 999) / 1000, MAXIMUM_RESPONSE_TIMEOUT);
+
+    QJsonObject request;
+    request.insert("subscribe", false);
+    request.insert("responseTimeout", responseTimeout);
+
+    const QString handler = handlerForPreferredMethods();
+    if (!handler.isEmpty())
+        request.insert("Handler", handler);
+
+    QString payload = QJsonDocument(request).toJson();
+
     try {
-        mRequestCall = mHandle.callOneReply("luna://org.webosports.service.location/getCurrentPosition", "{}");
+        mRequestCall = mHandle.callOneReply("luna://com.webos.service.location/getLocationUpdates",
+                                            payload.toUtf8().constData());
 
         mRequestCall.continueWith(cbProcessResults, this);
         mRequestCall.setTimeout(timeout);
     }
     catch (LS::Error &error) {
-        qWarning("Failed to getCurrentPosition: %s", error.what());
+        qWarning("Failed to request getLocationUpdates: %s", error.what());
         m_error = UnknownSourceError;
         Q_EMIT QGeoPositionInfoSource::errorOccurred(m_error);
     }
@@ -202,6 +289,8 @@ void QGeoPositionInfoSourceLuneOS::requestTimeout()
 #ifdef Q_LOCATION_LUNEOS_DEBUG
     qDebug() << "QGeoPositionInfoSourceLuneOS requestUpdate timeout occurred.";
 #endif
+
+    mRequestCall.cancel();
 
     Q_EMIT QGeoPositionInfoSource::errorOccurred(QGeoPositionInfoSource::UpdateTimeoutError);
 }
@@ -224,36 +313,63 @@ bool QGeoPositionInfoSourceLuneOS::cbProcessResults(LSHandle *handle, LSMessage 
 
     bool success = response.value("returnValue").toBool();
     if (!success) {
+        qWarning("com.webos.service.location returned an error: %d %s",
+                 response.value("errorCode").toInt(),
+                 qPrintable(response.value("errorText").toString()));
         instance->m_error = UnknownSourceError;
         Q_EMIT instance->QGeoPositionInfoSource::errorOccurred(instance->m_error);
         return true;
     }
 
+    /*
+     * The subscription acknowledgement carries returnValue but no fix, so only
+     * treat a reply as a position once it actually has coordinates.
+     */
+    if (!response.contains("latitude") || !response.contains("longitude"))
+        return true;
+
     double latitude = response.value("latitude").toDouble(qQNaN());
     double longitude = response.value("longitude").toDouble(qQNaN());
     double altitude = response.value("altitude").toDouble(qQNaN());
-    int timestamp = response.value("timestamp").toInt(QDateTime::currentMSecsSinceEpoch());
+
+    /*
+     * timestamp is int64 milliseconds since the epoch (see
+     * location_util_add_pos_json). It must not go through toInt(), which is
+     * 32-bit and silently truncates, nor through setSecsSinceEpoch().
+     */
+    qint64 timestamp = static_cast<qint64>(
+        response.value("timestamp").toDouble(QDateTime::currentMSecsSinceEpoch()));
     QDateTime qtimestamp;
-    qtimestamp.setSecsSinceEpoch(timestamp);
+    qtimestamp.setMSecsSinceEpoch(timestamp);
 
     QGeoPositionInfo position = QGeoPositionInfo(QGeoCoordinate(latitude, longitude, altitude), qtimestamp);
 
     double horizontalAccuracy = response.value("horizAccuracy").toDouble(qQNaN());
     double verticalAccuracy = response.value("vertAccuracy").toDouble(qQNaN());
-    double velocity = response.value("velocity").toDouble(qQNaN());
-    double direction = response.value("heading").toDouble(qQNaN());
+    double speed = response.value("speed").toDouble(qQNaN());
+    double direction = response.value("direction").toDouble(qQNaN());
 
     if (!qIsNaN(horizontalAccuracy) && horizontalAccuracy != -1)
         position.setAttribute(QGeoPositionInfo::HorizontalAccuracy, horizontalAccuracy);
     if (!qIsNaN(verticalAccuracy) && verticalAccuracy != -1)
         position.setAttribute(QGeoPositionInfo::VerticalAccuracy, verticalAccuracy);
-    if (!qIsNaN(velocity) && velocity != -1)
-        position.setAttribute(QGeoPositionInfo::GroundSpeed, velocity);
+    if (!qIsNaN(speed) && speed != -1)
+        position.setAttribute(QGeoPositionInfo::GroundSpeed, speed);
     if (!qIsNaN(direction) && direction != -1)
         position.setAttribute(QGeoPositionInfo::Direction, direction);
 
     if (position.isValid()) {
+        instance->m_error = NoError;
         instance->m_lastPosition = position;
+
+        /*
+         * A fix satisfies any requestUpdate() in flight, so cancel its timer
+         * before emitting - otherwise it fires afterwards and reports a
+         * spurious UpdateTimeoutError for a request that succeeded.
+         */
+        if (instance->m_requestTimer.isActive())
+            instance->m_requestTimer.stop();
+
         Q_EMIT instance->positionUpdated(position);
     }
 
