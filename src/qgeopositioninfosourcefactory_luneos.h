@@ -42,7 +42,14 @@ class QGeoPositionInfoSourceFactoryLuneOS: public QObject, public QGeoPositionIn
 {
     Q_OBJECT
 
-    Q_PLUGIN_METADATA(IID "org.qt-project.qt.position.sourcefactory/5.0"
+    /*
+     * Must match the version Q_DECLARE_INTERFACE gives
+     * QGeoPositionInfoSourceFactory in the Qt being built against - Qt 6 uses
+     * /6.0. The factory loader compares this string before it will hand the
+     * plugin out, and a mismatch is not an error: it reads the metadata, skips
+     * the plugin, and silently falls back to another provider.
+     */
+    Q_PLUGIN_METADATA(IID "org.qt-project.qt.position.sourcefactory/6.0"
                       FILE "plugin.json")
 
     Q_INTERFACES(QGeoPositionInfoSourceFactory)

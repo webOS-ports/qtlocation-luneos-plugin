@@ -70,6 +70,8 @@ private Q_SLOTS:
 private:
     static bool cbProcessResults(LSHandle *handle, LSMessage *message, void *context);
 
+    QString handlerForPreferredMethods() const;
+
     bool m_running;
     Error m_error;
     QTimer m_requestTimer;
